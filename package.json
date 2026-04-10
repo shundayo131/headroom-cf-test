@@ -1,0 +1,12 @@
+{
+  "name": "headroom-test",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260212.0",
+    "wrangler": "^4.41.2"
+  }
+}
