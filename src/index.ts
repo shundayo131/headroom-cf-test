@@ -1,8 +1,13 @@
-// Headroom proxy test worker — reproduces zstd issue from Cloudflare Workers.
+// Headroom proxy test worker — reproduces response decompression bug from Cloudflare Workers.
+// Cloudflare's edge infrastructure manages compression between the Worker and upstream servers.
+// The forwarded Accept-Encoding header can cause OpenAI to return responses in an encoding
+// that Headroom's httpx cannot decompress, resulting in UnicodeDecodeError.
+//
 // Three test patterns:
-//   GET /test/openai    — OpenAI via Headroom passthrough (should fail with zstd bug)
-//   GET /test/claude    — Claude via Headroom passthrough (should work)
-//   GET /test/compress  — Headroom compress + direct OpenAI call (workaround)
+//   GET /test/openai    — OpenAI via Headroom passthrough (fails: handler doesn't strip accept-encoding)
+//   GET /test/claude    — Claude via Headroom passthrough (works: handler strips accept-encoding)
+//   GET /test/compress  — Headroom compress + direct OpenAI call (works: workaround)
+//   GET /test/all       — Run all three patterns
 
 interface Env {
   HEADROOM_URL: string;       // e.g. https://memoca-production.up.railway.app/v1
@@ -16,8 +21,8 @@ const TEST_MESSAGES = [
 ];
 
 // Pattern 1: Call OpenAI /v1/chat/completions through Headroom proxy passthrough.
-// Cloudflare Workers adds Accept-Encoding: zstd automatically.
-// Headroom's OpenAI handler forwards this to OpenAI, gets zstd response, crashes.
+// Headroom's OpenAI handler forwards the client's Accept-Encoding header to OpenAI.
+// OpenAI may return a compressed response that httpx cannot decompress → 502 error.
 async function testOpenAiPassthrough(env: Env) {
   const response = await fetch(`${env.HEADROOM_URL}/chat/completions`, {
     method: "POST",
@@ -41,7 +46,7 @@ async function testOpenAiPassthrough(env: Env) {
 }
 
 // Pattern 2: Call Claude /v1/messages through Headroom proxy passthrough.
-// Headroom's Anthropic handler strips accept-encoding, so no zstd issue.
+// Headroom's Anthropic handler strips accept-encoding before forwarding, so no issue.
 async function testClaudePassthrough(env: Env) {
   const response = await fetch(`${env.HEADROOM_URL}/messages`, {
     method: "POST",
@@ -68,7 +73,7 @@ async function testClaudePassthrough(env: Env) {
 }
 
 // Pattern 3: Compress via Headroom, then call OpenAI directly.
-// Avoids zstd issue because /v1/compress doesn't call upstream.
+// Avoids the decompression issue because /v1/compress doesn't make an upstream LLM call.
 async function testCompressThenOpenAi(env: Env) {
   // Step 1: Compress
   const compressResponse = await fetch(`${env.HEADROOM_URL}/compress`, {
